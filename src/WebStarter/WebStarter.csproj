@@ -83,6 +83,7 @@
     <ProjectReference Include="..\Plugins\BotSharp.Plugin.MetaGLM\BotSharp.Plugin.MetaGLM.csproj" />
     <ProjectReference Include="..\Plugins\BotSharp.Plugin.Planner\BotSharp.Plugin.Planner.csproj" />
     <ProjectReference Include="..\Plugins\BotSharp.Plugin.TencentCos\BotSharp.Plugin.TencentCos.csproj" />
+    <ProjectReference Include="..\Plugins\BotSharp.Plugin.XiaoZhi\BotSharp.Plugin.XiaoZhi.csproj" />
   </ItemGroup>
   
   <ItemGroup>
