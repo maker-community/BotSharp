@@ -1,7 +1,5 @@
 using BotSharp.Abstraction.Hooks;
 using BotSharp.Abstraction.MLTasks;
-using BotSharp.Abstraction.Options;
-using BotSharp.Core.Session;
 using BotSharp.Plugin.XiaoZhi.Models;
 using BotSharp.Plugin.XiaoZhi.Settings;
 using Microsoft.AspNetCore.Http;
@@ -77,14 +75,6 @@ public class XiaoZhiStreamMiddleware
     private async Task HandleWebSocket(IServiceProvider services, string agentId, string conversationId, WebSocket webSocket)
     {
         var settings = services.GetRequiredService<XiaoZhiSettings>();
-        using var session = new BotSharpRealtimeSession(services, webSocket, new ChatSessionOptions
-        {
-            Provider = "BotSharp XiaoZhi Stream",
-            BufferSize = 1024 * 32,
-            JsonOptions = BotSharp.Abstraction.Options.BotSharpOptions.defaultJsonOptions,
-            Logger = _logger
-        });
-
         var hub = services.GetRequiredService<IRealtimeHub>();
         var conn = hub.SetHubConnection(conversationId);
         conn.CurrentAgentId = agentId;
@@ -104,16 +94,24 @@ public class XiaoZhiStreamMiddleware
 
         _logger.LogInformation("XiaoZhi client connected for conversation {ConversationId}", conversationId);
 
+        var buffer = new byte[1024 * 32];
+
         try
         {
-            await foreach (ChatSessionUpdate update in session.ReceiveUpdatesAsync(CancellationToken.None))
+            while (webSocket.State == WebSocketState.Open)
             {
-                if (update?.RawResponse == null) continue;
+                var receiveResult = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
 
-                // Handle text messages (JSON)
-                if (update.ResponseType == ChatSessionUpdateType.Text)
+                if (receiveResult.MessageType == WebSocketMessageType.Close)
                 {
-                    var message = update.RawResponse;
+                    await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
+                    break;
+                }
+
+                // Handle text messages (JSON control messages)
+                if (receiveResult.MessageType == WebSocketMessageType.Text)
+                {
+                    var message = Encoding.UTF8.GetString(buffer, 0, receiveResult.Count);
                     _logger.LogDebug("Received text message: {Message}", message);
 
                     try
@@ -184,7 +182,7 @@ public class XiaoZhiStreamMiddleware
                     }
                 }
                 // Handle binary messages (audio)
-                else if (update.ResponseType == ChatSessionUpdateType.Binary && update.RawBytes != null)
+                else if (receiveResult.MessageType == WebSocketMessageType.Binary)
                 {
                     if (!isConnected)
                     {
@@ -192,7 +190,7 @@ public class XiaoZhiStreamMiddleware
                         continue;
                     }
 
-                    var audioData = ExtractAudioFromBinaryMessage(update.RawBytes, protocolVersion);
+                    var audioData = ExtractAudioFromBinaryMessage(buffer.AsSpan(0, receiveResult.Count).ToArray(), protocolVersion);
                     if (audioData != null && audioData.Length > 0)
                     {
                         await hub.Completer.AppenAudioBuffer(Convert.ToBase64String(audioData));
@@ -212,7 +210,6 @@ public class XiaoZhiStreamMiddleware
                 await hub.Completer.Disconnect();
             }
             convService.SaveStates();
-            await session.DisconnectAsync();
         }
     }
 
