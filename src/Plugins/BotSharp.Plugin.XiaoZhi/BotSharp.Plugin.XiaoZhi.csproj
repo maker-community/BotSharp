@@ -1,4 +1,4 @@
-
+﻿
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
@@ -9,6 +9,10 @@
     <OutputPath>$(SolutionDir)packages</OutputPath>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OpusSharp" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\Infrastructure\BotSharp.Core\BotSharp.Core.csproj" />

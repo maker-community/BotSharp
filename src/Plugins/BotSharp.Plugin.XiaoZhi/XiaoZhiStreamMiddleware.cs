@@ -1,6 +1,6 @@
-using BotSharp.Abstraction.Hooks;
-using BotSharp.Abstraction.MLTasks;
+using BotSharp.Abstraction.Realtime.Settings;
 using BotSharp.Plugin.XiaoZhi.Models;
+using BotSharp.Plugin.XiaoZhi.Services;
 using BotSharp.Plugin.XiaoZhi.Settings;
 using Microsoft.AspNetCore.Http;
 using System.Buffers.Binary;
@@ -87,6 +87,8 @@ public class XiaoZhiStreamMiddleware
         var routing = services.GetRequiredService<IRoutingService>();
         routing.Context.Push(agentId);
 
+        var audioCodedec = services.GetRequiredService<IAudioCodec>();
+
         // XiaoZhi connection state
         string? sessionId = null;
         int protocolVersion = settings.DefaultProtocolVersion;
@@ -128,7 +130,7 @@ public class XiaoZhiStreamMiddleware
                                 protocolVersion = clientHello.Version;
                                 sessionId = Guid.NewGuid().ToString();
 
-                                _logger.LogInformation("Client hello received: version={Version}, transport={Transport}", 
+                                _logger.LogInformation("Client hello received: version={Version}, transport={Transport}",
                                     protocolVersion, clientHello.Transport);
 
                                 // Send server hello
@@ -150,7 +152,7 @@ public class XiaoZhiStreamMiddleware
                                 // Connect to model after handshake
                                 if (!isConnected)
                                 {
-                                    await ConnectToModel(hub, webSocket, protocolVersion);
+                                    await ConnectToModel(hub, webSocket, protocolVersion, services);
                                     isConnected = true;
                                 }
                             }
@@ -190,10 +192,32 @@ public class XiaoZhiStreamMiddleware
                         continue;
                     }
 
-                    var audioData = ExtractAudioFromBinaryMessage(buffer.AsSpan(0, receiveResult.Count).ToArray(), protocolVersion);
+                    var audioData = new byte[receiveResult.Count];
+                    Array.Copy(buffer, audioData, receiveResult.Count);
+
+                    //var audioData = ExtractAudioFromBinaryMessage(buffer.AsSpan(0, receiveResult.Count).ToArray(), protocolVersion);
                     if (audioData != null && audioData.Length > 0)
                     {
-                        await hub.Completer.AppenAudioBuffer(Convert.ToBase64String(audioData));
+                        try
+                        {
+                            // Convert Opus to target format
+                            var convertedPcmAudio = audioCodedec.Decode(audioData, settings.SampleRate, settings.Channels);
+                            try
+                            {
+                                if (convertedPcmAudio.Length > 0)
+                                {
+                                    await hub.Completer.AppenAudioBuffer(convertedPcmAudio, convertedPcmAudio.Length);
+                                }
+                            }
+                            catch (FormatException ex)
+                            {
+                                _logger.LogError(ex, "Invalid base64 audio data, skipping frame");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Error converting audio data: {Message}", ex.Message);
+                        }
                     }
                 }
             }
@@ -213,12 +237,12 @@ public class XiaoZhiStreamMiddleware
         }
     }
 
-    private async Task ConnectToModel(IRealtimeHub hub, WebSocket webSocket, int protocolVersion)
+    private async Task ConnectToModel(IRealtimeHub hub, WebSocket webSocket, int protocolVersion, IServiceProvider services)
     {
         await hub.ConnectToModel(async data =>
         {
             // Convert response data to XiaoZhi format and send
-            await SendBinaryMessage(webSocket, data, protocolVersion);
+            await SendBinaryMessage(webSocket, data, protocolVersion, services);
         });
     }
 
@@ -269,37 +293,48 @@ public class XiaoZhiStreamMiddleware
         await webSocket.SendAsync(new ArraySegment<byte>(buffer), WebSocketMessageType.Text, true, CancellationToken.None);
     }
 
-    private async Task SendBinaryMessage(WebSocket webSocket, string base64Audio, int protocolVersion)
+    private async Task SendBinaryMessage(WebSocket webSocket, string base64Audio, int protocolVersion, IServiceProvider services)
     {
         try
         {
+            // Get RealtimeModelSettings to determine output audio format
+            var realtimeSettings = services.GetRequiredService<RealtimeModelSettings>();
+            var xiaozhiSettings = services.GetRequiredService<XiaoZhiSettings>();
+
+            // Azure OpenAI returns audio in the format specified by OutputAudioFormat (pcm16 or g711_ulaw)
+            // XiaoZhi expects opus format
             var audioData = Convert.FromBase64String(base64Audio);
+
+            // Convert API output format to opus for XiaoZhi client
+            var outputFormat = realtimeSettings.OutputAudioFormat ?? "pcm16";
+            var opusData = AudioConverter.ConvertToOpus(audioData, outputFormat, xiaozhiSettings.SampleRate);
+
             byte[] message;
 
             if (protocolVersion == 2)
             {
                 // Protocol V2: version(2) + type(2) + reserved(4) + timestamp(4) + payloadSize(4) + payload
-                message = new byte[16 + audioData.Length];
+                message = new byte[16 + opusData.Length];
                 BinaryPrimitives.WriteUInt16BigEndian(message.AsSpan(0, 2), 2); // version
                 BinaryPrimitives.WriteUInt16BigEndian(message.AsSpan(2, 2), 0); // type: OPUS
                 BinaryPrimitives.WriteUInt32BigEndian(message.AsSpan(4, 4), 0); // reserved
                 BinaryPrimitives.WriteUInt32BigEndian(message.AsSpan(8, 4), 0); // timestamp (not used for server->client)
-                BinaryPrimitives.WriteUInt32BigEndian(message.AsSpan(12, 4), (uint)audioData.Length);
-                Array.Copy(audioData, 0, message, 16, audioData.Length);
+                BinaryPrimitives.WriteUInt32BigEndian(message.AsSpan(12, 4), (uint)opusData.Length);
+                Array.Copy(opusData, 0, message, 16, opusData.Length);
             }
             else if (protocolVersion == 3)
             {
                 // Protocol V3: type(1) + reserved(1) + payloadSize(2) + payload
-                message = new byte[4 + audioData.Length];
+                message = new byte[4 + opusData.Length];
                 message[0] = 0; // type: OPUS
                 message[1] = 0; // reserved
-                BinaryPrimitives.WriteUInt16BigEndian(message.AsSpan(2, 2), (ushort)audioData.Length);
-                Array.Copy(audioData, 0, message, 4, audioData.Length);
+                BinaryPrimitives.WriteUInt16BigEndian(message.AsSpan(2, 2), (ushort)opusData.Length);
+                Array.Copy(opusData, 0, message, 4, opusData.Length);
             }
             else
             {
                 // Protocol V1: raw audio data
-                message = audioData;
+                message = opusData;
             }
 
             await webSocket.SendAsync(new ArraySegment<byte>(message), WebSocketMessageType.Binary, true, CancellationToken.None);

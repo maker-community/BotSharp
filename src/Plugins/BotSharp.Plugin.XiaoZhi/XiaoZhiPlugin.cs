@@ -1,4 +1,5 @@
 using BotSharp.Abstraction.Plugins;
+using BotSharp.Plugin.XiaoZhi.Services;
 using BotSharp.Plugin.XiaoZhi.Settings;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
@@ -24,6 +25,7 @@ public class XiaoZhiPlugin : IBotSharpAppPlugin
             var settingService = provider.GetRequiredService<BotSharp.Abstraction.Settings.ISettingService>();
             return settingService.Bind<XiaoZhiSettings>("XiaoZhi");
         });
+        services.AddScoped<IAudioCodec, OpusSharpAudioCodec>();
     }
 
     public void Configure(IApplicationBuilder app)
