@@ -79,6 +79,9 @@ public class XiaoZhiStreamMiddleware
         var conn = hub.SetHubConnection(conversationId);
         conn.CurrentAgentId = agentId;
 
+        // Initialize event handlers to prevent null reference errors
+        InitEvents(conn, webSocket, services);
+
         // Load conversation and state
         var convService = services.GetRequiredService<IConversationService>();
         convService.SetConversationId(conversationId, []);
@@ -244,6 +247,47 @@ public class XiaoZhiStreamMiddleware
             // Convert response data to XiaoZhi format and send
             await SendBinaryMessage(webSocket, data, protocolVersion, services);
         });
+    }
+
+    private void InitEvents(RealtimeHubConnection conn, WebSocket webSocket, IServiceProvider services)
+    {
+        var xiaozhiSettings = services.GetRequiredService<XiaoZhiSettings>();
+        
+        // When model sends audio data
+        conn.OnModelMessageReceived = message =>
+        {
+            // Return the raw audio data, will be sent via SendBinaryMessage
+            return message;
+        };
+
+        // When model audio response is complete
+        conn.OnModelAudioResponseDone = () =>
+        {
+            // XiaoZhi doesn't require special done marker in binary protocol
+            // Return empty string to prevent null reference
+            return string.Empty;
+        };
+
+        // When user interrupts the model
+        conn.OnModelUserInterrupted = () =>
+        {
+            // XiaoZhi handles interruption by simply stopping audio playback
+            // Return empty string to prevent null reference
+            return string.Empty;
+        };
+
+        // Initialize OnModelReady to prevent null reference
+        conn.OnModelReady = () =>
+        {
+            _logger.LogInformation("XiaoZhi model ready for conversation {ConversationId}", conn.ConversationId);
+            return string.Empty;
+        };
+
+        // Initialize OnUserSpeechDetected to prevent null reference
+        conn.OnUserSpeechDetected = () =>
+        {
+            return string.Empty;
+        };
     }
 
     private byte[]? ExtractAudioFromBinaryMessage(byte[] data, int protocolVersion)
