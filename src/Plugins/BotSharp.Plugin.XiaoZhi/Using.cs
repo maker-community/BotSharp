@@ -1,0 +1,15 @@
+global using BotSharp.Abstraction.Agents;
+global using BotSharp.Abstraction.Conversations;
+global using BotSharp.Abstraction.Functions;
+global using BotSharp.Abstraction.Realtime;
+global using BotSharp.Abstraction.Realtime.Models;
+global using BotSharp.Abstraction.Realtime.Options;
+global using BotSharp.Abstraction.Realtime.Sessions;
+global using BotSharp.Abstraction.Routing;
+global using BotSharp.Abstraction.Utilities;
+global using Microsoft.Extensions.DependencyInjection;
+global using Microsoft.Extensions.Logging;
+global using System;
+global using System.Text.Json;
+global using System.Threading;
+global using System.Threading.Tasks;

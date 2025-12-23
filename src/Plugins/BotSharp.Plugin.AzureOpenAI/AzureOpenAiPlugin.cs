@@ -4,6 +4,7 @@ using BotSharp.Plugin.AzureOpenAI.Providers.Audio;
 using BotSharp.Plugin.AzureOpenAI.Providers.Chat;
 using BotSharp.Plugin.AzureOpenAI.Providers.Embedding;
 using BotSharp.Plugin.AzureOpenAI.Providers.Image;
+using BotSharp.Plugin.AzureOpenAI.Providers.Realtime;
 using BotSharp.Plugin.AzureOpenAI.Providers.Text;
 using Microsoft.Extensions.Configuration;
 
@@ -32,5 +33,6 @@ public class AzureOpenAiPlugin : IBotSharpPlugin
         services.AddScoped<ITextEmbedding, TextEmbeddingProvider>();
         services.AddScoped<IImageCompletion, ImageCompletionProvider>();
         services.AddScoped<IAudioTranscription, AudioCompletionProvider>();
+        services.AddScoped<IRealTimeCompletion, RealTimeCompletionProvider>();
     }
 }
